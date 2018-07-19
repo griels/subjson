@@ -5,102 +5,151 @@
 #include <memory>
 
 #include <utility>
-struct Err: std::exception{};struct Expression{};
+#include <set>
+#include <algorithm>
+#include <string>
+#include <strstream>
+struct Err: std::exception{};
 struct Value: public void*
 {
 
 };
+struct FieldExpr;
+typedef std::vector<FieldExpr> FieldExprVct;
+typedef std::set<FieldExpr> FieldExprSet;
 
-struct FieldExpr: public Expression{
-	typedef std::tuple<void*, std::string> Entry;
-	typedef std::vector<Entry> Path;
+struct Expression{
+    virtual std::shared_ptr<std::string> String() const =0;
+    virtual std::shared_ptr<FieldExprSet> RootRefs() const = 0;
 
 };
-struct FieldExpr  {
+
+template <typename STRINGITERABLE>
+std::string join(STRINGITERABLE Path, const std::string &separator)
+{
+    return *(Path.begin()) + std::accumulate(++Path.begin(),
+                                             Path.end(),
+                                             "",
+                                             [](const std::string &sum,
+                                                const std::string &addition) {
+                                                 return sum + "." + addition;
+                                             });
+}
+struct FieldExpr: public Expression  {
 	int Root;
 	std::vector<std::string> Path;
 	bool operator==(const FieldExpr& rhs) const;
+    std::shared_ptr<std::string> String() const {
+        static std::shared_ptr<std::string> DOC=std::make_shared("$doc");
+        std::shared_ptr<std::string> rootStr = DOC;
+        if (Root != 0) {
+            std::strstream result;
+            result<<"$"<<Root;
+            rootStr = result.str();
+        }
+
+        if (!Path.empty()) {
+            return std::make_shared(rootStr + join(Path,"."));
+
+        } else {
+            return rootStr;
+        }
+    };
+
+    std::shared_ptr<FieldExprSet> RootRefs() const {
+        if (Root) {
+            return nullptr;
+        }
+        return std::make_shared<FieldExprSet>({*this});
+    };
 };
 
-typedef std::vector<FieldExpr> FieldExprVct;
-bool fieldExprCompare(const FieldExpr& lhs, const FieldExpr& rhs) {
-	if (rhs.Root != lhs.Root) {
-		return false;
-	}
-
-	if (rhs.Path.size() != lhs.Path.size()){
-		return false;
-	}
-
-	return lhs.Path==rhs.Path;
+bool fieldExprCompare(const FieldExpr &lhs, const FieldExpr &rhs)
+{
+    return rhs.Root == lhs.Root && rhs.Path.size() == lhs.Path.size() &&
+           lhs.Path == rhs.Path;
 }
 
 bool bool FieldExpr::operator==(const FieldExpr &rhs) const {
 	return fieldExprCompare(*this,rhs);
 }
-std::shared_ptr<FieldExprVct> rootSetAddOne(const std::shared_ptr<FieldExprVct> set, const FieldExpr& item ) {
 
-	auto found=std::find(set->begin(), set->end(),item);
-	if (found!=set->end())
-	{
-		return set;
-	}
-	auto freshSet = std::make_shared<FieldExprVct>(set);
-	freshSet->push_back(item);
-	return freshSet;
+std::shared_ptr<const FieldExprSet> rootSetAdd(
+        std::shared_ptr<const FieldExprSet> exprSet,
+        const std::vector<FieldExpr> &items)
+{
+    FieldExprSet output;
+    std::set_difference(exprSet->begin(),
+                        exprSet->end(),
+                        items.begin(),
+                        items.end(),
+                        output.begin());
+    if (output.empty()) {
+        return exprSet;
+    }
+    auto freshSet(std::make_shared<FieldExprSet>(exprSet));
+    freshSet->insert(output.begin(), output.end());
+    return freshSet;
+}
+std::shared_ptr<const FieldExprSet> rootSetAddOne(
+        std::shared_ptr<const FieldExprSet> exprSet, const FieldExpr &item)
+{
+    return rootSetAdd(exprSet, std::vector<FieldExpr>{item});
 }
 
+struct TrueExpr : public Expression {
+    std::shared_ptr<std::string> String() const {
+        static std::shared_ptr<std::string> TRUE=std::make_shared("True");
+        return TRUE;
+    }
 
-std::shared_ptr<FieldExprVct> rootSetAdd(std::shared_ptr<FieldExprVct> set, items ...FieldExpr) []FieldExpr {
-	out := set
-	for _, item := range items {
-		out = rootSetAddOne(out, item)
-	}
-	return out
+    std::shared_ptr<FieldExprSet> RootRefs() const {return nullptr;}
 }
 
-type Expression interface {
-	String() string
-	RootRefs() []FieldExpr
+struct FalseExpr: public Expression {
+    std::shared_ptr<std::string> String() const {
+        static std::shared_ptr<std::string> TRUE=std::make_shared("False");
+        return TRUE;
+    }
+
+    std::shared_ptr<FieldExprSet> RootRefs() const {return nullptr;}
+};
+struct Any{
+    union {
+        std::string text;
+        unsigned int uint;
+    } data;
+    enum {ANY_TEXT,ANY_UINT} type;
+    template <typename STREAM>
+    void write(STREAM& stream) const{
+        switch (type){
+            case ANY_TEXT:
+                stream<<data.text;
+                break;
+            case ANY_UINT:
+                stream<<data.uint;
+                break;
+        }
+    }
+
+};
+
+struct ValueExpr: public Expression  {
+	Any Value;
+    std::shared_ptr<std::string> String() const {
+        std::strstream result;
+        Value.write(result);
+        return std::make_shared(result.str());
+    }
+    std::shared_ptr<FieldExprSet> RootRefs() const{
+        return nullptr;
+    }
 }
 
-type TrueExpr struct {
-}
+struct AndExpr{
 
-func (expr TrueExpr) String() string {
-	return "True"
-}
 
-func (expr TrueExpr) RootRefs() []FieldExpr {
-	return nil
-}
-
-type FalseExpr struct {
-}
-
-func (expr FalseExpr) String() string {
-	return "True"
-}
-
-func (expr FalseExpr) RootRefs() []FieldExpr {
-	return nil
-}
-
-type ValueExpr struct {
-	Value interface{}
-}
-
-func (expr ValueExpr) String() string {
-	return fmt.Sprintf("%v", expr.Value)
-}
-
-func (expr ValueExpr) RootRefs() []FieldExpr {
-	return nil
-}
-
-type AndExpr []Expression
-
-func (expr AndExpr) String() string {
+    std::shared_ptr<std::string> String() const {
 	if len(expr) == 0 {
 		return "%%ERROR%%"
 	} else if len(expr) == 1 {
@@ -113,15 +162,16 @@ func (expr AndExpr) String() string {
 		}
 		return value
 	}
-}
 
-func (expr AndExpr) RootRefs() []FieldExpr {
-	var out []FieldExpr
-	for _, subexpr := range expr {
-		out = rootSetAdd(out, subexpr.RootRefs()...)
-	}
-	return out
-}
+
+    std::shared_ptr<FieldExprSet> RootRefs() const{
+        var out []FieldExpr
+        for _, subexpr := range expr {
+            out = rootSetAdd(out, subexpr.RootRefs()...)
+        }
+        return out
+    }
+};
 
 type OrExpr []Expression
 
@@ -148,25 +198,6 @@ func (expr OrExpr) RootRefs() []FieldExpr {
 	return out
 }
 
-func (expr FieldExpr) String() string {
-	rootStr := "$doc"
-	if expr.Root != 0 {
-		rootStr = fmt.Sprintf("$%d", expr.Root)
-	}
-
-	if len(expr.Path) > 0 {
-		return rootStr + "." + strings.Join(expr.Path, ".")
-	} else {
-		return rootStr
-	}
-}
-
-func (expr FieldExpr) RootRefs() []FieldExpr {
-	if expr.Root != 0 {
-		return nil
-	}
-	return []FieldExpr{expr}
-}
 
 type AnyInExpr struct {
 	VarId   int
