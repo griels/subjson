@@ -2,7 +2,9 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.8.9)
 PROJECT(subjson)
 SET(SUBJSON_GTEST ${PROJECT_SOURCE_DIR}/contrib/gtest)
 INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR})
-
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 INCLUDE(CTest)
 
 if (COUCHBASE_SERVER_BUILD)
@@ -29,11 +31,18 @@ ELSE()
 ENDIF()
 
 SET(SUBJSON_SRC subdoc/match.cc subdoc/operations.cc subdoc/path.cc
-    subdoc/util.cc)
+    subdoc/util.cc src/cpp/slowmatcher.cpp)
 ADD_LIBRARY(subjson ${SUBJSON_SRC})
 TARGET_LINK_LIBRARIES(subjson ${EXTRA_LIBS})
 ADD_EXECUTABLE(bench bench.cc contrib/cliopts/cliopts.c)
 TARGET_LINK_LIBRARIES(bench subjson)
+
+set_target_properties(subjson PROPERTIES
+        CXX_STANDARD 17
+        CXX_EXTENSIONS OFF
+        )
+
+set_property(TARGET subjson PROPERTY CXX_STANDARD 17)
 
 IF(EXISTS ${SUBJSON_GTEST} OR EXISTS ${gtest_SOURCE_DIR})
   ENABLE_TESTING()
